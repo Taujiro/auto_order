@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Streamlit and local environment
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# Credentials and OAuth tokens
+credentials.json
+token.json
+token*.json
+*.revogado-*.json
+assinatura.png
+
+# Local private business data
+fornecedores.xlsx
+pedidos/
+enviados/
+logs/
+referencias_precos/
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.pdf
+
+# Generated/downloaded artifacts
+downloads/
+tmp/
+temp/
+*.tmp
+*.bak
+~$*
+
+# Node or frontend caches, if added later
+node_modules/
+dist/
+build/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
