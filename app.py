@@ -197,6 +197,13 @@ def normalize_product_code(value: object) -> str:
     return re.sub(r"[^A-Z0-9]+", "", text)
 
 
+def normalize_product_code_strict(value: object) -> str:
+    text = str(value or "").strip().upper()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"[^A-Z0-9]+", "", text)
+
+
 def parse_brazilian_number(value: object) -> float | None:
     if value is None or pd.isna(value):
         return None
@@ -284,6 +291,7 @@ def parse_solida_quote_text(text: str) -> pd.DataFrame:
                 {
                     "codigo": code,
                     "codigo_normalizado": normalize_product_code(code),
+                    "codigo_comparacao": normalize_product_code_strict(code),
                     "quantidade_cotada": pd.NA,
                     "preco_cotado": pd.NA,
                     "status_extracao": "ERRO_EXTRACAO",
@@ -294,6 +302,7 @@ def parse_solida_quote_text(text: str) -> pd.DataFrame:
             {
                 "codigo": code,
                 "codigo_normalizado": normalize_product_code(code),
+                "codigo_comparacao": normalize_product_code_strict(code),
                 "quantidade_cotada": quantity,
                 "preco_cotado": round(float(unit_price), 4),
                 "status_extracao": "",
@@ -332,6 +341,7 @@ def parse_tsa_quote_text(text: str) -> pd.DataFrame:
                 {
                     "codigo": code,
                     "codigo_normalizado": normalize_product_code(code),
+                    "codigo_comparacao": normalize_product_code_strict(code),
                     "quantidade_cotada": quantity,
                     "preco_cotado": pd.NA,
                     "status_extracao": "ERRO_EXTRACAO",
@@ -342,6 +352,7 @@ def parse_tsa_quote_text(text: str) -> pd.DataFrame:
             {
                 "codigo": code,
                 "codigo_normalizado": normalize_product_code(code),
+                "codigo_comparacao": normalize_product_code_strict(code),
                 "quantidade_cotada": quantity,
                 "preco_cotado": round(float(unit_price), 4),
                 "status_extracao": "",
@@ -401,6 +412,7 @@ def parse_gonel_quote_text(text: str) -> pd.DataFrame:
                 {
                     "codigo": code,
                     "codigo_normalizado": normalize_product_code(code),
+                    "codigo_comparacao": normalize_product_code_strict(code),
                     "quantidade_cotada": pd.NA,
                     "preco_cotado": pd.NA,
                     "status_extracao": "ERRO_EXTRACAO",
@@ -413,6 +425,7 @@ def parse_gonel_quote_text(text: str) -> pd.DataFrame:
             {
                 "codigo": code,
                 "codigo_normalizado": normalize_product_code(code),
+                "codigo_comparacao": normalize_product_code_strict(code),
                 "quantidade_cotada": int(quantity_text),
                 "preco_cotado": round(float(unit_price), 4) if unit_price is not None else pd.NA,
                 "status_extracao": "" if unit_price is not None else "ERRO_EXTRACAO",
@@ -452,6 +465,7 @@ def parse_wisa_quote_text(text: str) -> pd.DataFrame:
                 {
                     "codigo": code,
                     "codigo_normalizado": normalize_product_code(code),
+                    "codigo_comparacao": normalize_product_code_strict(code),
                     "quantidade_cotada": pd.NA,
                     "preco_cotado": pd.NA,
                     "status_extracao": "ERRO_EXTRACAO",
@@ -464,6 +478,7 @@ def parse_wisa_quote_text(text: str) -> pd.DataFrame:
             {
                 "codigo": code,
                 "codigo_normalizado": normalize_product_code(code),
+                "codigo_comparacao": normalize_product_code_strict(code),
                 "quantidade_cotada": int(quantity_text),
                 "preco_cotado": round(float(unit_price), 4) if unit_price is not None else pd.NA,
                 "status_extracao": "" if unit_price is not None else "ERRO_EXTRACAO",
@@ -473,7 +488,14 @@ def parse_wisa_quote_text(text: str) -> pd.DataFrame:
 
 
 def quote_items_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
-    columns = ["codigo", "codigo_normalizado", "quantidade_cotada", "preco_cotado", "status_extracao"]
+    columns = [
+        "codigo",
+        "codigo_normalizado",
+        "codigo_comparacao",
+        "quantidade_cotada",
+        "preco_cotado",
+        "status_extracao",
+    ]
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -505,7 +527,8 @@ def detect_tsa_quote(text: str, fornecedor: str) -> bool:
 
 def detect_solida_quote(text: str, fornecedor: str) -> bool:
     normalized_text = normalize_text(text)
-    return "cod produto qtde" in normalized_text and "ipi" not in normalized_text
+    compact_text = re.sub(r"[^a-z0-9]+", " ", normalized_text)
+    return "cod produto qtde" in compact_text and "ipi" not in compact_text
 
 
 QUOTE_PARSERS = [
@@ -551,10 +574,11 @@ def read_sent_order_items(order_path: Path) -> pd.DataFrame:
             {
                 "codigo": code,
                 "codigo_normalizado": normalize_product_code(code),
+                "codigo_comparacao": normalize_product_code_strict(code),
                 "quantidade_pedida": int(quantity) if float(quantity).is_integer() else quantity,
             }
         )
-    return pd.DataFrame(rows, columns=["codigo", "codigo_normalizado", "quantidade_pedida"])
+    return pd.DataFrame(rows, columns=["codigo", "codigo_normalizado", "codigo_comparacao", "quantidade_pedida"])
 
 
 def find_reference_base_folder() -> Path:
@@ -644,7 +668,11 @@ def read_reference_prices(reference_path: Path) -> dict[str, float]:
         if price is None or price <= 0:
             continue
         for code_column in code_columns:
-            normalized_code = normalize_product_code(row.get(code_column))
+            code_value = row.get(code_column)
+            strict_code = normalize_product_code_strict(code_value)
+            normalized_code = normalize_product_code(code_value)
+            if strict_code:
+                prices.setdefault(strict_code, float(price))
             if normalized_code:
                 prices.setdefault(normalized_code, float(price))
     return prices
@@ -656,18 +684,37 @@ def build_conference_report(
     reference_prices: dict[str, float],
     tolerance_percent: float = PRICE_TOLERANCE_PERCENT,
 ) -> pd.DataFrame:
-    quote_by_code = {
-        str(row["codigo_normalizado"]): row
-        for _, row in quote_items.dropna(subset=["codigo_normalizado"]).iterrows()
-        if str(row.get("codigo_normalizado", "")).strip()
+    quote_by_strict_code, quote_by_numeric_code = build_quote_lookup(quote_items)
+    reference_strict_lookup = {key: value for key, value in reference_prices.items() if re.search(r"[A-Z]", key)}
+    reference_numeric_candidates: dict[str, list[float]] = {}
+    for key, value in reference_prices.items():
+        numeric_key = normalize_product_code(key)
+        if numeric_key:
+            reference_numeric_candidates.setdefault(numeric_key, []).append(value)
+    reference_numeric_lookup = {
+        key: values[0]
+        for key, values in reference_numeric_candidates.items()
+        if len(set(values)) == 1
     }
+
     rows = []
     for _, order in order_items.iterrows():
         code = str(order.get("codigo", "") or "").strip()
         normalized_code = str(order.get("codigo_normalizado", "") or "").strip()
+        strict_code = str(order.get("codigo_comparacao", "") or "").strip()
         ordered_quantity = order.get("quantidade_pedida")
-        quote = quote_by_code.get(normalized_code)
-        reference_price = reference_prices.get(normalized_code)
+        quote = lookup_by_strict_or_numeric(
+            strict_code,
+            normalized_code,
+            quote_by_strict_code,
+            quote_by_numeric_code,
+        )
+        reference_price = lookup_by_strict_or_numeric(
+            strict_code,
+            normalized_code,
+            reference_strict_lookup,
+            reference_numeric_lookup,
+        )
 
         quoted_quantity = pd.NA
         quoted_price = pd.NA
@@ -718,6 +765,38 @@ def conference_report_to_excel_bytes(report: pd.DataFrame) -> bytes:
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         report.to_excel(writer, index=False, sheet_name="Conferencia")
     return output.getvalue()
+
+
+def build_quote_lookup(quote_items: pd.DataFrame) -> tuple[dict[str, pd.Series], dict[str, pd.Series]]:
+    strict_lookup: dict[str, pd.Series] = {}
+    numeric_candidates: dict[str, list[pd.Series]] = {}
+    for _, row in quote_items.iterrows():
+        strict_key = str(row.get("codigo_comparacao", "") or "").strip()
+        numeric_key = str(row.get("codigo_normalizado", "") or "").strip()
+        if strict_key:
+            strict_lookup[strict_key] = row
+        if numeric_key:
+            numeric_candidates.setdefault(numeric_key, []).append(row)
+
+    numeric_lookup = {
+        key: candidates[0]
+        for key, candidates in numeric_candidates.items()
+        if len({str(candidate.get("codigo_comparacao", "") or "").strip() for candidate in candidates}) == 1
+    }
+    return strict_lookup, numeric_lookup
+
+
+def lookup_by_strict_or_numeric(
+    strict_key: str,
+    numeric_key: str,
+    strict_lookup: dict[str, object],
+    numeric_lookup: dict[str, object],
+) -> object | None:
+    if strict_key and strict_key in strict_lookup:
+        return strict_lookup[strict_key]
+    if numeric_key:
+        return numeric_lookup.get(numeric_key)
+    return None
 
 
 def display_name_from_file(file_path: Path) -> str:

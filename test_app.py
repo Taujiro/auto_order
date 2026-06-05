@@ -453,6 +453,11 @@ class ConferenciaCotacaoTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Formato de cotacao nao suportado"):
                 app.extract_quote_items_from_pdf(Path("unknown.pdf"), "UNKNOWN")
 
+    def test_find_quote_parser_detects_solida_header_with_abbreviated_code_label(self) -> None:
+        parser = app.find_quote_parser("Cód. Produto Qtde\n1 11041 ITEM 1 29,48 29,48", "AUTOBRAS")
+
+        self.assertEqual(parser.name, "SOLIDA")
+
     def test_read_sent_order_items_uses_catalogo_and_qnt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             order_file = Path(temp_dir) / "pedido.xlsx"
@@ -582,6 +587,75 @@ class ConferenciaCotacaoTests(unittest.TestCase):
 
         self.assertEqual(list(loaded.columns), app.CONFERENCE_REPORT_COLUMNS)
         self.assertEqual(loaded.iloc[0]["status"], "OK")
+
+    def test_build_conference_report_preserves_distinct_code_prefixes(self) -> None:
+        order_items = pd.DataFrame(
+            [
+                {
+                    "codigo": "G-1001",
+                    "codigo_normalizado": "1001",
+                    "codigo_comparacao": "G1001",
+                    "quantidade_pedida": 3,
+                },
+                {
+                    "codigo": "TG-1001",
+                    "codigo_normalizado": "1001",
+                    "codigo_comparacao": "TG1001",
+                    "quantidade_pedida": 7,
+                },
+                {
+                    "codigo": "F-11041",
+                    "codigo_normalizado": "11041",
+                    "codigo_comparacao": "F11041",
+                    "quantidade_pedida": 1,
+                },
+            ]
+        )
+        quote_items = pd.DataFrame(
+            [
+                {
+                    "codigo": "G-1001",
+                    "codigo_normalizado": "1001",
+                    "codigo_comparacao": "G1001",
+                    "quantidade_cotada": 3,
+                    "preco_cotado": 18.03,
+                },
+                {
+                    "codigo": "TG-1001",
+                    "codigo_normalizado": "1001",
+                    "codigo_comparacao": "TG1001",
+                    "quantidade_cotada": 7,
+                    "preco_cotado": 7.26,
+                },
+                {
+                    "codigo": "11041",
+                    "codigo_normalizado": "11041",
+                    "codigo_comparacao": "11041",
+                    "quantidade_cotada": 1,
+                    "preco_cotado": 29.48,
+                },
+            ]
+        )
+        reference_prices = {
+            "G1001": 18.03,
+            "TG1001": 7.26,
+            "11041": 29.48,
+        }
+
+        report = app.build_conference_report(order_items, quote_items, reference_prices)
+
+        g_1001 = report[report["codigo"] == "G-1001"].iloc[0]
+        tg_1001 = report[report["codigo"] == "TG-1001"].iloc[0]
+        f_11041 = report[report["codigo"] == "F-11041"].iloc[0]
+        self.assertEqual(g_1001["quantidade_cotada"], 3)
+        self.assertAlmostEqual(g_1001["preco_referencia"], 18.03, places=2)
+        self.assertEqual(g_1001["status"], "OK")
+        self.assertEqual(tg_1001["quantidade_cotada"], 7)
+        self.assertAlmostEqual(tg_1001["preco_referencia"], 7.26, places=2)
+        self.assertEqual(tg_1001["status"], "OK")
+        self.assertEqual(f_11041["quantidade_cotada"], 1)
+        self.assertAlmostEqual(f_11041["preco_referencia"], 29.48, places=2)
+        self.assertEqual(f_11041["status"], "OK")
 
 
 class GmailAuthTests(unittest.TestCase):
