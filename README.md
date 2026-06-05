@@ -1,4 +1,4 @@
-# Pedidos Email Auto
+# Auto Order Email
 
 A local Python and Streamlit application for automating supplier order emails, pending-balance requests, and supplier quote checking workflows.
 
