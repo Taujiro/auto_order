@@ -13,6 +13,7 @@ from email.message import EmailMessage
 from email.utils import make_msgid
 from io import BytesIO
 from pathlib import Path
+from typing import Callable
 
 import certifi
 import pandas as pd
@@ -162,6 +163,13 @@ class PendenciaEmail:
     fornecedor: str
     email: str
     cc: str = ""
+
+
+@dataclass(frozen=True)
+class QuoteParser:
+    name: str
+    detector: Callable[[str, str], bool]
+    parser: Callable[[str], pd.DataFrame]
 
 
 def ensure_project_structure() -> None:
@@ -342,17 +350,183 @@ def parse_tsa_quote_text(text: str) -> pd.DataFrame:
     return quote_items_dataframe(rows)
 
 
+def normalize_gonel_lines(lines: list[str]) -> list[str]:
+    normalized_lines: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        broken_code = re.match(r"^(\d{1,3})\s+([A-Z]+-)\s*$", line, flags=re.IGNORECASE)
+        if broken_code and index + 1 < len(lines):
+            next_line = lines[index + 1]
+            next_match = re.match(r"^(\d+)\b(.*)$", next_line)
+            if next_match:
+                code = f"{broken_code.group(2).upper()}{next_match.group(1)}"
+                normalized_lines.append(f"{broken_code.group(1)} {code}{next_match.group(2)}")
+                index += 2
+                continue
+        normalized_lines.append(line)
+        index += 1
+    return normalized_lines
+
+
+def parse_gonel_quote_text(text: str) -> pd.DataFrame:
+    lines = normalize_gonel_lines([line.strip() for line in text.splitlines() if line.strip()])
+    blocks: list[tuple[str, list[str]]] = []
+    current_code = ""
+    current_lines: list[str] = []
+
+    for line in lines:
+        match = re.match(r"^(\d{1,3})\s+([A-Z]+-\d+)\b(.*)$", line, flags=re.IGNORECASE)
+        if match:
+            if current_lines:
+                blocks.append((current_code, current_lines))
+            current_code = match.group(2).upper()
+            current_lines = [line]
+        elif current_lines:
+            current_lines.append(line)
+    if current_lines:
+        blocks.append((current_code, current_lines))
+
+    rows = []
+    for code, block_lines in blocks:
+        block = " ".join(block_lines)
+        matches = re.findall(
+            r"\b(\d+)\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s+[A-Z0-9]+\s+"
+            r"(\d{1,3}(?:\.\d{3})*,\d{2})\s+(\d{1,3}(?:\.\d{3})*,\d{2})\b",
+            block,
+            flags=re.IGNORECASE,
+        )
+        if not matches:
+            rows.append(
+                {
+                    "codigo": code,
+                    "codigo_normalizado": normalize_product_code(code),
+                    "quantidade_cotada": pd.NA,
+                    "preco_cotado": pd.NA,
+                    "status_extracao": "ERRO_EXTRACAO",
+                }
+            )
+            continue
+        quantity_text, _gross_text, unit_text, _total_text = matches[-1]
+        unit_price = parse_brazilian_number(unit_text)
+        rows.append(
+            {
+                "codigo": code,
+                "codigo_normalizado": normalize_product_code(code),
+                "quantidade_cotada": int(quantity_text),
+                "preco_cotado": round(float(unit_price), 4) if unit_price is not None else pd.NA,
+                "status_extracao": "" if unit_price is not None else "ERRO_EXTRACAO",
+            }
+        )
+    return quote_items_dataframe(rows)
+
+
+def parse_wisa_quote_text(text: str) -> pd.DataFrame:
+    lines = [line.strip().replace("\u00a0", " ") for line in text.splitlines() if line.strip()]
+    blocks: list[tuple[str, list[str]]] = []
+    current_code = ""
+    current_lines: list[str] = []
+
+    for line in lines:
+        start = re.match(r"^(\d{1,3})\s+(\d{4}[A-Z]?)(.*)$", line, flags=re.IGNORECASE)
+        if start:
+            if current_lines:
+                blocks.append((current_code, current_lines))
+            current_code = start.group(2).upper()
+            current_lines = [line]
+        elif current_lines:
+            current_lines.append(line)
+    if current_lines:
+        blocks.append((current_code, current_lines))
+
+    rows = []
+    for code, block_lines in blocks:
+        block = " ".join(block_lines)
+        matches = re.findall(
+            r"\s(\d+)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(\d{1,3},\d{2})\s+"
+            r"(\d{1,3}(?:\.\d{3})*,\d{2})\s+(\d{1,3}(?:\.\d{3})*,\d{2})",
+            block,
+        )
+        if not matches:
+            rows.append(
+                {
+                    "codigo": code,
+                    "codigo_normalizado": normalize_product_code(code),
+                    "quantidade_cotada": pd.NA,
+                    "preco_cotado": pd.NA,
+                    "status_extracao": "ERRO_EXTRACAO",
+                }
+            )
+            continue
+        quantity_text, unit_text, _ipi_text, _total_text, _total_with_tax_text = matches[-1]
+        unit_price = parse_brazilian_number(unit_text)
+        rows.append(
+            {
+                "codigo": code,
+                "codigo_normalizado": normalize_product_code(code),
+                "quantidade_cotada": int(quantity_text),
+                "preco_cotado": round(float(unit_price), 4) if unit_price is not None else pd.NA,
+                "status_extracao": "" if unit_price is not None else "ERRO_EXTRACAO",
+            }
+        )
+    return quote_items_dataframe(rows)
+
+
 def quote_items_dataframe(rows: list[dict[str, object]]) -> pd.DataFrame:
     columns = ["codigo", "codigo_normalizado", "quantidade_cotada", "preco_cotado", "status_extracao"]
     return pd.DataFrame(rows, columns=columns)
 
 
+def detect_gonel_quote(text: str, fornecedor: str) -> bool:
+    normalized_text = normalize_text(text)
+    normalized_supplier = normalize_text(fornecedor)
+    return (
+        "gonel" in normalized_supplier
+        or "lwm representacoes" in normalized_text
+        or "fornecedor gonel" in normalized_text
+    )
+
+
+def detect_wisa_quote(text: str, fornecedor: str) -> bool:
+    normalized_text = normalize_text(text)
+    normalized_supplier = normalize_text(fornecedor)
+    return (
+        "wisa" in normalized_supplier
+        or "j guimaraes representacoes" in normalized_text
+        or "industria wisa industrial" in normalized_text
+    )
+
+
+def detect_tsa_quote(text: str, fornecedor: str) -> bool:
+    normalized_text = normalize_text(text)
+    normalized_supplier = normalize_text(fornecedor)
+    return "tsa" in normalized_supplier or "item qtde codigo" in normalized_text
+
+
+def detect_solida_quote(text: str, fornecedor: str) -> bool:
+    normalized_text = normalize_text(text)
+    return "cod produto qtde" in normalized_text and "ipi" not in normalized_text
+
+
+QUOTE_PARSERS = [
+    QuoteParser("GONEL_LWM", detect_gonel_quote, parse_gonel_quote_text),
+    QuoteParser("WISA_J_GUIMARAES", detect_wisa_quote, parse_wisa_quote_text),
+    QuoteParser("TSA", detect_tsa_quote, parse_tsa_quote_text),
+    QuoteParser("SOLIDA", detect_solida_quote, parse_solida_quote_text),
+]
+
+
+def find_quote_parser(text: str, fornecedor: str = "") -> QuoteParser:
+    for parser in QUOTE_PARSERS:
+        if parser.detector(text, fornecedor):
+            return parser
+    raise ValueError("Formato de cotacao nao suportado. Envie um PDF em layout cadastrado.")
+
+
 def extract_quote_items_from_pdf(pdf_source: Path | BytesIO | object, fornecedor: str = "") -> pd.DataFrame:
     text = read_pdf_text(pdf_source)
-    fornecedor_normalizado = normalize_text(fornecedor)
-    if "item qtde codigo" in normalize_text(text) or fornecedor_normalizado == "tsa":
-        return parse_tsa_quote_text(text)
-    return parse_solida_quote_text(text)
+    parser = find_quote_parser(text, fornecedor)
+    return parser.parser(text)
 
 
 def find_column_by_normalized_name(df: pd.DataFrame, candidates: set[str], contains: str | None = None) -> str:

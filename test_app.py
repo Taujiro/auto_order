@@ -418,6 +418,41 @@ class ConferenciaCotacaoTests(unittest.TestCase):
         self.assertEqual(first["quantidade_cotada"], 2)
         self.assertAlmostEqual(first["preco_cotado"], 42.58, places=2)
 
+    def test_extract_quote_items_from_gonel_pdf(self) -> None:
+        pdf_path = self.sample_pdf_from_env("GONEL_QUOTE_PDF")
+        if pdf_path is None:
+            self.skipTest("Defina GONEL_QUOTE_PDF para testar o parser com PDF real.")
+
+        items = app.extract_quote_items_from_pdf(pdf_path, "GONEL")
+
+        first = items.iloc[0]
+        self.assertEqual(first["codigo"], "G-1001")
+        self.assertEqual(first["quantidade_cotada"], 3)
+        self.assertAlmostEqual(first["preco_cotado"], 18.03, places=2)
+        broken_code = items[items["codigo"] == "TG-1001"].iloc[0]
+        self.assertEqual(broken_code["quantidade_cotada"], 7)
+        self.assertAlmostEqual(broken_code["preco_cotado"], 6.87, places=2)
+
+    def test_extract_quote_items_from_wisa_pdf(self) -> None:
+        pdf_path = self.sample_pdf_from_env("WISA_QUOTE_PDF")
+        if pdf_path is None:
+            self.skipTest("Defina WISA_QUOTE_PDF para testar o parser com PDF real.")
+
+        items = app.extract_quote_items_from_pdf(pdf_path, "WISA")
+
+        first = items.iloc[0]
+        self.assertEqual(first["codigo"], "7001")
+        self.assertEqual(first["quantidade_cotada"], 1)
+        self.assertAlmostEqual(first["preco_cotado"], 10.10, places=2)
+        item_7032 = items[items["codigo"] == "7032"].iloc[0]
+        self.assertEqual(item_7032["quantidade_cotada"], 50)
+        self.assertAlmostEqual(item_7032["preco_cotado"], 23.09, places=2)
+
+    def test_extract_quote_items_raises_clear_error_for_unsupported_format(self) -> None:
+        with patch.object(app, "read_pdf_text", return_value="unknown quote format"):
+            with self.assertRaisesRegex(ValueError, "Formato de cotacao nao suportado"):
+                app.extract_quote_items_from_pdf(Path("unknown.pdf"), "UNKNOWN")
+
     def test_read_sent_order_items_uses_catalogo_and_qnt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             order_file = Path(temp_dir) / "pedido.xlsx"
