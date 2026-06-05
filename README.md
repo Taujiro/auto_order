@@ -1,4 +1,11 @@
-# Auto Order Email
+# Auto Order
+![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python)
+![Streamlit](https://img.shields.io/badge/Streamlit-red?logo=streamlit)
+![Pandas](https://img.shields.io/badge/Pandas-purple?logo=pandas)
+![Gmail API](https://img.shields.io/badge/Gmail%20API-orange?logo=gmail)
+![Local App](https://img.shields.io/badge/app-local-blue)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
+![AI Assisted](https://img.shields.io/badge/AI-assisted-purple)
 
 A local Python and Streamlit application for automating supplier order emails, pending-balance requests, and supplier quote checking workflows.
 
