@@ -564,11 +564,44 @@ def find_reference_base_folder() -> Path:
     return DEFAULT_REFERENCE_DIR
 
 
+def reference_lookup_key(value: object) -> str:
+    text = normalize_text(value)
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
 def find_reference_file(fornecedor: str) -> Path | None:
-    file_name = REFERENCE_FILE_NAMES.get(str(fornecedor or "").strip().upper())
-    if not file_name:
+    supplier_name = str(fornecedor or "").strip()
+    if not supplier_name:
         return None
-    return find_reference_base_folder() / file_name
+
+    reference_base = find_reference_base_folder()
+    explicit_file_name = REFERENCE_FILE_NAMES.get(supplier_name.upper())
+    if explicit_file_name:
+        return reference_base / explicit_file_name
+
+    supplier_key = reference_lookup_key(supplier_name)
+    if reference_base.exists():
+        for candidate in reference_base.glob("*.xlsx"):
+            if reference_lookup_key(candidate.stem) == supplier_key:
+                return candidate
+
+    return reference_base / f"{sanitize_filename_part(supplier_name)}.xlsx"
+
+
+def conference_supplier_names(fornecedores: pd.DataFrame) -> list[str]:
+    if fornecedores.empty or "fornecedor" not in fornecedores.columns:
+        return []
+
+    names = []
+    seen = set()
+    for value in fornecedores["fornecedor"].tolist():
+        supplier = str(value or "").strip()
+        supplier_key = normalize_text(supplier)
+        if not supplier or supplier_key in seen:
+            continue
+        seen.add(supplier_key)
+        names.append(supplier)
+    return names
 
 
 def choose_reference_sheet(reference_path: Path) -> str | int:
@@ -1383,10 +1416,14 @@ def list_sent_order_files_for_supplier(fornecedor: str) -> list[Path]:
     return sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def render_conferencia_tab() -> None:
+def render_conferencia_tab(fornecedores: pd.DataFrame) -> None:
     st.subheader("Conferencia de cotacoes")
 
-    suppliers = list(REFERENCE_FILE_NAMES)
+    suppliers = conference_supplier_names(fornecedores)
+    if not suppliers:
+        st.info("Cadastre fornecedores em fornecedores.xlsx antes de gerar conferencias.")
+        return
+
     selected_supplier = st.selectbox("Fornecedor", suppliers, key="conferencia_fornecedor")
     reference_file = find_reference_file(selected_supplier)
     sent_order_files = list_sent_order_files_for_supplier(selected_supplier)
@@ -1394,7 +1431,7 @@ def render_conferencia_tab() -> None:
     if reference_file is None or not reference_file.exists():
         st.error(f"Planilha de referencia nao encontrada para {selected_supplier}.")
         if reference_file is not None:
-            st.write(f"Caminho esperado: `{reference_file}`")
+            st.write(f"Coloque a planilha de referencia como `{reference_file.name}` em `{reference_file.parent}`.")
         return
 
     selected_order = None
@@ -1652,7 +1689,7 @@ def main() -> None:
         render_pendencias_tab(fornecedores)
 
     with conferencia_tab:
-        render_conferencia_tab()
+        render_conferencia_tab(fornecedores)
 
 
 if __name__ == "__main__":

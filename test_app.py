@@ -493,6 +493,36 @@ class ConferenciaCotacaoTests(unittest.TestCase):
             with patch.dict(os.environ, {"PRICE_REFERENCE_DIR": temp_dir}):
                 self.assertEqual(app.find_reference_base_folder(), Path(temp_dir))
 
+    def test_find_reference_file_discovers_supplier_workbook_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference_dir = Path(temp_dir)
+            reference_file = reference_dir / "GONEL.xlsx"
+            reference_file.write_bytes(b"placeholder")
+
+            with patch.dict(os.environ, {"PRICE_REFERENCE_DIR": str(reference_dir)}):
+                self.assertEqual(app.find_reference_file("GONEL"), reference_file)
+
+    def test_find_reference_file_keeps_explicit_reference_name_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reference_dir = Path(temp_dir)
+            reference_file = reference_dir / "Autobras.xlsx"
+            reference_file.write_bytes(b"placeholder")
+
+            with patch.dict(os.environ, {"PRICE_REFERENCE_DIR": str(reference_dir)}):
+                self.assertEqual(app.find_reference_file("AUTOBRAS"), reference_file)
+
+    def test_conference_suppliers_come_from_fornecedores_dataframe(self) -> None:
+        fornecedores = pd.DataFrame(
+            [
+                {"fornecedor": "AUTOBRAS", "email": "autobras@example.com"},
+                {"fornecedor": "GONEL", "email": "gonel@example.com"},
+                {"fornecedor": "WISA", "email": "wisa@example.com"},
+                {"fornecedor": "", "email": "empty@example.com"},
+            ]
+        )
+
+        self.assertEqual(app.conference_supplier_names(fornecedores), ["AUTOBRAS", "GONEL", "WISA"])
+
     def test_build_conference_report_outputs_required_columns_and_statuses(self) -> None:
         order_items = pd.DataFrame(
             [

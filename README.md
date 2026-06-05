@@ -140,11 +140,13 @@ You can also define a custom folder using an environment variable:
 $env:PRICE_REFERENCE_DIR="C:\path\to\price_references"
 ```
 
-The currently expected supplier reference files are:
+For new suppliers, the reference workbook should use the supplier name from `fornecedores.xlsx`.
+For example:
 
-* `Autobras.xlsx`
-* `Tuba.xlsx`
-* `Tsa.xlsx`
+* `GONEL.xlsx`
+* `WISA.xlsx`
+
+Some legacy suppliers can also use the explicit names already mapped by the app, such as `Autobras.xlsx`, `Tuba.xlsx`, and `Tsa.xlsx`.
 
 ## Tests
 
