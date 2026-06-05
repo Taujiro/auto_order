@@ -1,0 +1,3 @@
+fornecedor,email,cc,pasta
+SAMPLE SUPPLIER,purchasing@example.com,manager@example.com,C:\path\to\supplier-folder
+SUPPLIER WITHOUT CC,sales@example.com,,C:\path\to\supplier-without-cc
